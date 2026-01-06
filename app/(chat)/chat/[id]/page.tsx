@@ -9,6 +9,8 @@ import { DEFAULT_CHAT_MODEL } from "@/lib/ai/models";
 import { getChatById, getMessagesByChatId } from "@/lib/db/queries";
 import { convertToUIMessages } from "@/lib/utils";
 
+export const dynamic = "force-dynamic";
+
 export default function Page(props: { params: Promise<{ id: string }> }) {
   return (
     <Suspense fallback={<div className="flex h-dvh" />}>
@@ -22,7 +24,7 @@ async function ChatPage({ params }: { params: Promise<{ id: string }> }) {
   const chat = await getChatById({ id });
 
   if (!chat) {
-    redirect("/");
+    notFound();
   }
 
   const session = await auth();
@@ -57,6 +59,7 @@ async function ChatPage({ params }: { params: Promise<{ id: string }> }) {
           autoResume={true}
           id={chat.id}
           initialChatModel={DEFAULT_CHAT_MODEL}
+          initialLastContext={chat.lastContext ?? undefined}
           initialMessages={uiMessages}
           initialVisibilityType={chat.visibility}
           isReadonly={session?.user?.id !== chat.userId}
@@ -72,6 +75,7 @@ async function ChatPage({ params }: { params: Promise<{ id: string }> }) {
         autoResume={true}
         id={chat.id}
         initialChatModel={chatModelFromCookie.value}
+        initialLastContext={chat.lastContext ?? undefined}
         initialMessages={uiMessages}
         initialVisibilityType={chat.visibility}
         isReadonly={session?.user?.id !== chat.userId}

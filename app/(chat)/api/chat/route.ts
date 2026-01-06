@@ -7,15 +7,21 @@ import {
   stepCountIs,
   streamText,
 } from "ai";
+import { unstable_cache as cache } from "next/cache";
 import { after } from "next/server";
 import {
   createResumableStreamContext,
   type ResumableStreamContext,
 } from "resumable-stream";
+import type { ModelCatalog } from "tokenlens/core";
+import { fetchModels } from "tokenlens/fetch";
+import { getUsage } from "tokenlens/helpers";
 import { auth, type UserType } from "@/app/(auth)/auth";
+import type { VisibilityType } from "@/components/visibility-selector";
 import { entitlementsByUserType } from "@/lib/ai/entitlements";
+import type { ChatModel } from "@/lib/ai/models";
 import { type RequestHints, systemPrompt } from "@/lib/ai/prompts";
-import { getLanguageModel } from "@/lib/ai/providers";
+import { myProvider } from "@/lib/ai/providers";
 import { createDocument } from "@/lib/ai/tools/create-document";
 import { getWeather } from "@/lib/ai/tools/get-weather";
 import { requestSuggestions } from "@/lib/ai/tools/request-suggestions";
@@ -29,12 +35,12 @@ import {
   getMessagesByChatId,
   saveChat,
   saveMessages,
-  updateChatTitleById,
-  updateMessage,
+  updateChatLastContextById,
 } from "@/lib/db/queries";
 import type { DBMessage } from "@/lib/db/schema";
 import { ChatSDKError } from "@/lib/errors";
 import type { ChatMessage } from "@/lib/types";
+import type { AppUsage } from "@/lib/usage";
 import { convertToUIMessages, generateUUID } from "@/lib/utils";
 import { generateTitleFromUserMessage } from "../../actions";
 import { type PostRequestBody, postRequestBodySchema } from "./schema";
@@ -42,6 +48,22 @@ import { type PostRequestBody, postRequestBodySchema } from "./schema";
 export const maxDuration = 60;
 
 let globalStreamContext: ResumableStreamContext | null = null;
+
+const getTokenlensCatalog = cache(
+  async (): Promise<ModelCatalog | undefined> => {
+    try {
+      return await fetchModels();
+    } catch (err) {
+      console.warn(
+        "TokenLens: catalog fetch failed, using default catalog",
+        err
+      );
+      return; // tokenlens helpers will fall back to defaultCatalog
+    }
+  },
+  ["tokenlens-catalog"],
+  { revalidate: 24 * 60 * 60 } // 24 hours
+);
 
 export function getStreamContext() {
   if (!globalStreamContext) {
@@ -74,8 +96,17 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { id, message, messages, selectedChatModel, selectedVisibilityType } =
-      requestBody;
+    const {
+      id,
+      message,
+      selectedChatModel,
+      selectedVisibilityType,
+    }: {
+      id: string;
+      message: ChatMessage;
+      selectedChatModel: ChatModel["id"];
+      selectedVisibilityType: VisibilityType;
+    } = requestBody;
 
     const session = await auth();
 
@@ -94,38 +125,30 @@ export async function POST(request: Request) {
       return new ChatSDKError("rate_limit:chat").toResponse();
     }
 
-    // Check if this is a tool approval flow (all messages sent)
-    const isToolApprovalFlow = Boolean(messages);
-
     const chat = await getChatById({ id });
     let messagesFromDb: DBMessage[] = [];
-    let titlePromise: Promise<string> | null = null;
 
     if (chat) {
       if (chat.userId !== session.user.id) {
         return new ChatSDKError("forbidden:chat").toResponse();
       }
-      // Only fetch messages if chat already exists and not tool approval
-      if (!isToolApprovalFlow) {
-        messagesFromDb = await getMessagesByChatId({ id });
-      }
-    } else if (message?.role === "user") {
-      // Save chat immediately with placeholder title
+      // Only fetch messages if chat already exists
+      messagesFromDb = await getMessagesByChatId({ id });
+    } else {
+      const title = await generateTitleFromUserMessage({
+        message,
+      });
+
       await saveChat({
         id,
         userId: session.user.id,
-        title: "New chat",
+        title,
         visibility: selectedVisibilityType,
       });
-
-      // Start title generation in parallel (don't await)
-      titlePromise = generateTitleFromUserMessage({ message });
+      // New chat - no need to fetch messages, it's empty
     }
 
-    // Use all messages for tool approval, otherwise DB messages + new message
-    const uiMessages = isToolApprovalFlow
-      ? (messages as ChatMessage[])
-      : [...convertToUIMessages(messagesFromDb), message as ChatMessage];
+    const uiMessages = [...convertToUIMessages(messagesFromDb), message];
 
     const { longitude, latitude, city, country } = geolocation(request);
 
@@ -136,64 +159,41 @@ export async function POST(request: Request) {
       country,
     };
 
-    // Only save user messages to the database (not tool approval responses)
-    if (message?.role === "user") {
-      await saveMessages({
-        messages: [
-          {
-            chatId: id,
-            id: message.id,
-            role: "user",
-            parts: message.parts,
-            attachments: [],
-            createdAt: new Date(),
-          },
-        ],
-      });
-    }
+    await saveMessages({
+      messages: [
+        {
+          chatId: id,
+          id: message.id,
+          role: "user",
+          parts: message.parts,
+          attachments: [],
+          createdAt: new Date(),
+        },
+      ],
+    });
 
     const streamId = generateUUID();
     await createStreamId({ streamId, chatId: id });
 
+    let finalMergedUsage: AppUsage | undefined;
+
     const stream = createUIMessageStream({
-      // Pass original messages for tool approval continuation
-      originalMessages: isToolApprovalFlow ? uiMessages : undefined,
-      execute: async ({ writer: dataStream }) => {
-        // Handle title generation in parallel
-        if (titlePromise) {
-          titlePromise.then((title) => {
-            updateChatTitleById({ chatId: id, title });
-            dataStream.write({ type: "data-chat-title", data: title });
-          });
-        }
-
-        const isReasoningModel =
-          selectedChatModel.includes("reasoning") ||
-          selectedChatModel.includes("thinking");
-
+      execute: ({ writer: dataStream }) => {
         const result = streamText({
-          model: getLanguageModel(selectedChatModel),
+          model: myProvider.languageModel(selectedChatModel),
           system: systemPrompt({ selectedChatModel, requestHints }),
-          messages: await convertToModelMessages(uiMessages),
+          messages: convertToModelMessages(uiMessages),
           stopWhen: stepCountIs(5),
-          experimental_activeTools: isReasoningModel
-            ? []
-            : [
-                "getWeather",
-                "createDocument",
-                "updateDocument",
-                "requestSuggestions",
-              ],
-          experimental_transform: isReasoningModel
-            ? undefined
-            : smoothStream({ chunking: "word" }),
-          providerOptions: isReasoningModel
-            ? {
-                anthropic: {
-                  thinking: { type: "enabled", budgetTokens: 10_000 },
-                },
-              }
-            : undefined,
+          experimental_activeTools:
+            selectedChatModel === "chat-model-reasoning"
+              ? []
+              : [
+                  "getWeather",
+                  "createDocument",
+                  "updateDocument",
+                  "requestSuggestions",
+                ],
+          experimental_transform: smoothStream({ chunking: "word" }),
           tools: {
             getWeather,
             createDocument: createDocument({ session, dataStream }),
@@ -207,6 +207,38 @@ export async function POST(request: Request) {
             isEnabled: isProductionEnvironment,
             functionId: "stream-text",
           },
+          onFinish: async ({ usage }) => {
+            try {
+              const providers = await getTokenlensCatalog();
+              const modelId =
+                myProvider.languageModel(selectedChatModel).modelId;
+              if (!modelId) {
+                finalMergedUsage = usage;
+                dataStream.write({
+                  type: "data-usage",
+                  data: finalMergedUsage,
+                });
+                return;
+              }
+
+              if (!providers) {
+                finalMergedUsage = usage;
+                dataStream.write({
+                  type: "data-usage",
+                  data: finalMergedUsage,
+                });
+                return;
+              }
+
+              const summary = getUsage({ modelId, usage, providers });
+              finalMergedUsage = { ...usage, ...summary, modelId } as AppUsage;
+              dataStream.write({ type: "data-usage", data: finalMergedUsage });
+            } catch (err) {
+              console.warn("TokenLens enrichment failed", err);
+              finalMergedUsage = usage;
+              dataStream.write({ type: "data-usage", data: finalMergedUsage });
+            }
+          },
         });
 
         result.consumeStream();
@@ -218,45 +250,27 @@ export async function POST(request: Request) {
         );
       },
       generateId: generateUUID,
-      onFinish: async ({ messages: finishedMessages }) => {
-        if (isToolApprovalFlow) {
-          // For tool approval, update existing messages (tool state changed) and save new ones
-          for (const finishedMsg of finishedMessages) {
-            const existingMsg = uiMessages.find((m) => m.id === finishedMsg.id);
-            if (existingMsg) {
-              // Update existing message with new parts (tool state changed)
-              await updateMessage({
-                id: finishedMsg.id,
-                parts: finishedMsg.parts,
-              });
-            } else {
-              // Save new message
-              await saveMessages({
-                messages: [
-                  {
-                    id: finishedMsg.id,
-                    role: finishedMsg.role,
-                    parts: finishedMsg.parts,
-                    createdAt: new Date(),
-                    attachments: [],
-                    chatId: id,
-                  },
-                ],
-              });
-            }
-          }
-        } else if (finishedMessages.length > 0) {
-          // Normal flow - save all finished messages
-          await saveMessages({
-            messages: finishedMessages.map((currentMessage) => ({
-              id: currentMessage.id,
-              role: currentMessage.role,
-              parts: currentMessage.parts,
-              createdAt: new Date(),
-              attachments: [],
+      onFinish: async ({ messages }) => {
+        await saveMessages({
+          messages: messages.map((currentMessage) => ({
+            id: currentMessage.id,
+            role: currentMessage.role,
+            parts: currentMessage.parts,
+            createdAt: new Date(),
+            attachments: [],
+            chatId: id,
+          })),
+        });
+
+        if (finalMergedUsage) {
+          try {
+            await updateChatLastContextById({
               chatId: id,
-            })),
-          });
+              context: finalMergedUsage,
+            });
+          } catch (err) {
+            console.warn("Unable to persist last usage for chat", id, err);
+          }
         }
       },
       onError: () => {
@@ -264,21 +278,15 @@ export async function POST(request: Request) {
       },
     });
 
-    const streamContext = getStreamContext();
+    // const streamContext = getStreamContext();
 
-    if (streamContext) {
-      try {
-        const resumableStream = await streamContext.resumableStream(
-          streamId,
-          () => stream.pipeThrough(new JsonToSseTransformStream())
-        );
-        if (resumableStream) {
-          return new Response(resumableStream);
-        }
-      } catch (error) {
-        console.error("Failed to create resumable stream:", error);
-      }
-    }
+    // if (streamContext) {
+    //   return new Response(
+    //     await streamContext.resumableStream(streamId, () =>
+    //       stream.pipeThrough(new JsonToSseTransformStream())
+    //     )
+    //   );
+    // }
 
     return new Response(stream.pipeThrough(new JsonToSseTransformStream()));
   } catch (error) {

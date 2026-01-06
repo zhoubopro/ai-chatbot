@@ -1,16 +1,12 @@
 import { simulateReadableStream } from "ai";
-import { MockLanguageModelV3 } from "ai/test";
+import { MockLanguageModelV2 } from "ai/test";
 import { getResponseChunksByPrompt } from "@/tests/prompts/utils";
 
-const mockUsage = {
-  inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
-  outputTokens: { total: 20, text: 20, reasoning: 0 },
-};
-
-export const chatModel = new MockLanguageModelV3({
+export const chatModel = new MockLanguageModelV2({
   doGenerate: async () => ({
+    rawCall: { rawPrompt: null, rawSettings: {} },
     finishReason: "stop",
-    usage: mockUsage,
+    usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
     content: [{ type: "text", text: "Hello, world!" }],
     warnings: [],
   }),
@@ -20,13 +16,15 @@ export const chatModel = new MockLanguageModelV3({
       initialDelayInMs: 1000,
       chunks: getResponseChunksByPrompt(prompt),
     }),
+    rawCall: { rawPrompt: null, rawSettings: {} },
   }),
 });
 
-export const reasoningModel = new MockLanguageModelV3({
+export const reasoningModel = new MockLanguageModelV2({
   doGenerate: async () => ({
+    rawCall: { rawPrompt: null, rawSettings: {} },
     finishReason: "stop",
-    usage: mockUsage,
+    usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
     content: [{ type: "text", text: "Hello, world!" }],
     warnings: [],
   }),
@@ -36,13 +34,15 @@ export const reasoningModel = new MockLanguageModelV3({
       initialDelayInMs: 1000,
       chunks: getResponseChunksByPrompt(prompt, true),
     }),
+    rawCall: { rawPrompt: null, rawSettings: {} },
   }),
 });
 
-export const titleModel = new MockLanguageModelV3({
+export const titleModel = new MockLanguageModelV2({
   doGenerate: async () => ({
+    rawCall: { rawPrompt: null, rawSettings: {} },
     finishReason: "stop",
-    usage: mockUsage,
+    usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
     content: [{ type: "text", text: "This is a test title" }],
     warnings: [],
   }),
@@ -57,17 +57,19 @@ export const titleModel = new MockLanguageModelV3({
         {
           type: "finish",
           finishReason: "stop",
-          usage: mockUsage,
+          usage: { inputTokens: 3, outputTokens: 10, totalTokens: 13 },
         },
       ],
     }),
+    rawCall: { rawPrompt: null, rawSettings: {} },
   }),
 });
 
-export const artifactModel = new MockLanguageModelV3({
+export const artifactModel = new MockLanguageModelV2({
   doGenerate: async () => ({
+    rawCall: { rawPrompt: null, rawSettings: {} },
     finishReason: "stop",
-    usage: mockUsage,
+    usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
     content: [{ type: "text", text: "Hello, world!" }],
     warnings: [],
   }),
@@ -77,5 +79,6 @@ export const artifactModel = new MockLanguageModelV3({
       initialDelayInMs: 100,
       chunks: getResponseChunksByPrompt(prompt),
     }),
+    rawCall: { rawPrompt: null, rawSettings: {} },
   }),
 });

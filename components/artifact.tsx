@@ -53,7 +53,6 @@ export type UIArtifact = {
 };
 
 function PureArtifact({
-  addToolApprovalResponse,
   chatId,
   input,
   setInput,
@@ -70,7 +69,6 @@ function PureArtifact({
   selectedVisibilityType,
   selectedModelId,
 }: {
-  addToolApprovalResponse: UseChatHelpers<ChatMessage>["addToolApprovalResponse"];
   chatId: string;
   input: string;
   setInput: Dispatch<SetStateAction<string>>;
@@ -322,7 +320,6 @@ function PureArtifact({
 
               <div className="flex h-full flex-col items-center justify-between">
                 <ArtifactMessages
-                  addToolApprovalResponse={addToolApprovalResponse}
                   artifactStatus={artifact.status}
                   chatId={chatId}
                   isReadonly={isReadonly}
