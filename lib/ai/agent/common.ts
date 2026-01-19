@@ -46,6 +46,62 @@ export type CreateDefaultStreamOptions = {
   onUsageUpdate?: (usage: AppUsage) => void;
 };
 
+export type UsageOnFinishOptions = {
+  selectedChatModel: ChatModel["id"];
+  dataStream: UIMessageStreamWriter<ChatMessage>;
+  onUsageUpdate?: (usage: AppUsage) => void;
+};
+
+export const createUsageOnFinish =
+  ({ selectedChatModel, dataStream, onUsageUpdate }: UsageOnFinishOptions) =>
+  async ({ usage }: { usage: AppUsage }) => {
+    try {
+      const providers = await getTokenlensCatalog();
+      const modelId = myProvider.languageModel(selectedChatModel).modelId;
+      if (!modelId) {
+        const finalMergedUsage = usage;
+        dataStream.write({
+          type: "data-usage",
+          data: finalMergedUsage,
+        });
+        if (onUsageUpdate) {
+          onUsageUpdate(finalMergedUsage);
+        }
+        return;
+      }
+
+      if (!providers) {
+        const finalMergedUsage = usage;
+        dataStream.write({
+          type: "data-usage",
+          data: finalMergedUsage,
+        });
+        if (onUsageUpdate) {
+          onUsageUpdate(finalMergedUsage);
+        }
+        return;
+      }
+
+      const summary = getUsage({ modelId, usage, providers });
+      const finalMergedUsage = {
+        ...usage,
+        ...summary,
+        modelId,
+      } as AppUsage;
+      dataStream.write({ type: "data-usage", data: finalMergedUsage });
+      if (onUsageUpdate) {
+        onUsageUpdate(finalMergedUsage);
+      }
+    } catch (err) {
+      console.warn("TokenLens enrichment failed", err);
+      const finalMergedUsage = usage;
+      dataStream.write({ type: "data-usage", data: finalMergedUsage });
+      if (onUsageUpdate) {
+        onUsageUpdate(finalMergedUsage);
+      }
+    }
+  };
+
 export function createDefaultStream({
   messages,
   selectedChatModel,
@@ -82,53 +138,10 @@ export function createDefaultStream({
       isEnabled: isProductionEnvironment,
       functionId: "stream-text",
     },
-    onFinish: async ({ usage }) => {
-      try {
-        const providers = await getTokenlensCatalog();
-        const modelId =
-          myProvider.languageModel(selectedChatModel).modelId;
-        if (!modelId) {
-          const finalMergedUsage = usage;
-          dataStream.write({
-            type: "data-usage",
-            data: finalMergedUsage,
-          });
-          if (onUsageUpdate) {
-            onUsageUpdate(finalMergedUsage);
-          }
-          return;
-        }
-
-        if (!providers) {
-          const finalMergedUsage = usage;
-          dataStream.write({
-            type: "data-usage",
-            data: finalMergedUsage,
-          });
-          if (onUsageUpdate) {
-            onUsageUpdate(finalMergedUsage);
-          }
-          return;
-        }
-
-        const summary = getUsage({ modelId, usage, providers });
-        const finalMergedUsage = {
-          ...usage,
-          ...summary,
-          modelId,
-        } as AppUsage;
-        dataStream.write({ type: "data-usage", data: finalMergedUsage });
-        if (onUsageUpdate) {
-          onUsageUpdate(finalMergedUsage);
-        }
-      } catch (err) {
-        console.warn("TokenLens enrichment failed", err);
-        const finalMergedUsage = usage;
-        dataStream.write({ type: "data-usage", data: finalMergedUsage });
-        if (onUsageUpdate) {
-          onUsageUpdate(finalMergedUsage);
-        }
-      }
-    },
+    onFinish: createUsageOnFinish({
+      selectedChatModel,
+      dataStream,
+      onUsageUpdate,
+    }),
   });
 }
