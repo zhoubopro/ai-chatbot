@@ -3,6 +3,8 @@ import { z } from "zod";
 import type { ArtifactKind } from "@/components/artifact";
 import type { createDocument } from "./ai/tools/create-document";
 import type { getWeather } from "./ai/tools/get-weather";
+import type { getResumeTemplateTool } from "./ai/tools/resume-template";
+import type { getBehaviouralQuestionsTool } from "./ai/tools/behavioural-questions";
 import type { requestSuggestions } from "./ai/tools/request-suggestions";
 import type { updateDocument } from "./ai/tools/update-document";
 import type { Suggestion } from "./db/schema";
@@ -23,11 +25,16 @@ type requestSuggestionsTool = InferUITool<
   ReturnType<typeof requestSuggestions>
 >;
 
+type getResumeTemplateToolType = InferUITool<typeof getResumeTemplateTool>;
+type getBehaviouralQuestionsToolType = InferUITool<typeof getBehaviouralQuestionsTool>;
+
 export type ChatTools = {
   getWeather: weatherTool;
   createDocument: createDocumentTool;
   updateDocument: updateDocumentTool;
   requestSuggestions: requestSuggestionsTool;
+  getResumeTemplate: getResumeTemplateToolType;
+  getBehaviouralQuestions: getBehaviouralQuestionsToolType;
 };
 
 export type CustomUIDataTypes = {

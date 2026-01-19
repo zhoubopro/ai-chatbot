@@ -3,6 +3,7 @@ import {
   smoothStream,
   stepCountIs,
   streamText,
+  type LanguageModelUsage,
   type UIMessageStreamWriter,
 } from "ai";
 import { unstable_cache as cache } from "next/cache";
@@ -37,27 +38,24 @@ const getTokenlensCatalog = cache(
   { revalidate: 24 * 60 * 60 } // 24 hours
 );
 
-export type CreateDefaultStreamOptions = {
-  messages: ChatMessage[];
-  selectedChatModel: ChatModel["id"];
-  requestHints: RequestHints;
-  session: Session;
+export type CreateUsageFinishHandlerOptions = {
+  modelId: string | undefined;
   dataStream: UIMessageStreamWriter<ChatMessage>;
   onUsageUpdate?: (usage: AppUsage) => void;
 };
 
-export type UsageOnFinishOptions = {
-  selectedChatModel: ChatModel["id"];
-  dataStream: UIMessageStreamWriter<ChatMessage>;
-  onUsageUpdate?: (usage: AppUsage) => void;
-};
-
-export const createUsageOnFinish =
-  ({ selectedChatModel, dataStream, onUsageUpdate }: UsageOnFinishOptions) =>
-  async ({ usage }: { usage: AppUsage }) => {
+/**
+ * 创建 usage finish 处理函数，用于处理 TokenLens enrichment 和 usage 更新
+ * 这是一个公共函数，可以在不同的 stream 创建函数中复用
+ */
+export function createUsageFinishHandler({
+  modelId,
+  dataStream,
+  onUsageUpdate,
+}: CreateUsageFinishHandlerOptions) {
+  return async ({ usage }: { usage: LanguageModelUsage }) => {
     try {
       const providers = await getTokenlensCatalog();
-      const modelId = myProvider.languageModel(selectedChatModel).modelId;
       if (!modelId) {
         const finalMergedUsage = usage;
         dataStream.write({
@@ -101,6 +99,16 @@ export const createUsageOnFinish =
       }
     }
   };
+}
+
+export type CreateDefaultStreamOptions = {
+  messages: ChatMessage[];
+  selectedChatModel: ChatModel["id"];
+  requestHints: RequestHints;
+  session: Session;
+  dataStream: UIMessageStreamWriter<ChatMessage>;
+  onUsageUpdate?: (usage: AppUsage) => void;
+};
 
 export function createDefaultStream({
   messages,
@@ -119,27 +127,27 @@ export function createDefaultStream({
       selectedChatModel === "chat-model-reasoning"
         ? []
         : [
-            "getWeather",
-            "createDocument",
-            "updateDocument",
-            "requestSuggestions",
+            // "getWeather",
+            // "createDocument",
+            // "updateDocument",
+            // "requestSuggestions",
           ],
     experimental_transform: smoothStream({ chunking: "word" }),
     tools: {
-      getWeather,
-      createDocument: createDocument({ session, dataStream }),
-      updateDocument: updateDocument({ session, dataStream }),
-      requestSuggestions: requestSuggestions({
-        session,
-        dataStream,
-      }),
+      // getWeather,
+      // createDocument: createDocument({ session, dataStream }),
+      // updateDocument: updateDocument({ session, dataStream }),
+      // requestSuggestions: requestSuggestions({
+      //   session,
+      //   dataStream,
+      // }),
     },
     experimental_telemetry: {
       isEnabled: isProductionEnvironment,
       functionId: "stream-text",
     },
-    onFinish: createUsageOnFinish({
-      selectedChatModel,
+    onFinish: createUsageFinishHandler({
+      modelId: myProvider.languageModel(selectedChatModel).modelId,
       dataStream,
       onUsageUpdate,
     }),

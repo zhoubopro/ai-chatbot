@@ -1,43 +1,39 @@
-import {
-  convertToModelMessages,
-  streamText,
-  type UIMessageStreamWriter,
-} from "ai";
-import type { ChatModel } from "@/lib/ai/models";
+import { convertToModelMessages, streamText, type UIMessageStreamWriter } from "ai";
 import type { ChatMessage } from "@/lib/types";
 import { myProvider } from "@/lib/ai/providers";
+import { createUsageFinishHandler } from "@/lib/ai/agent/common";
 import type { AppUsage } from "@/lib/usage";
-import { createUsageOnFinish } from "@/lib/ai/agent/common";
 import { scoreSkills } from "@/lib/ai/tools/score-skills";
+import { getResumeTemplateTool } from "@/lib/ai/tools/resume-template";
+
+export type CreateResumeOptStreamOptions = {
+  messages: ChatMessage[];
+  dataStream: UIMessageStreamWriter<ChatMessage>;
+  onUsageUpdate?: (usage: AppUsage) => void;
+};
 
 /**
  * 简历优化 AI Agent
  * 接收用户消息，AI 会自动判断是否有简历内容，如果没有则提示输入，如果有则进行优化
  */
-type CreateResumeOptStreamOptions = {
-  messages: ChatMessage[];
-  selectedChatModel?: ChatModel["id"];
-  dataStream: UIMessageStreamWriter<ChatMessage>;
-  onUsageUpdate?: (usage: AppUsage) => void;
-};
-
 export function createResumeOptStream({
   messages,
-  selectedChatModel = "chat-model",
   dataStream,
   onUsageUpdate,
 }: CreateResumeOptStreamOptions) {
-  const systemPrompt = `你的角色是：资深程序员 + 简历优化专家，最擅长程序员简历的评审和优化。
+  const systemPrompt = `你叫“Boz 帮手”，你的角色是：资深程序员 + 简历优化专家，最擅长程序员简历的评审和优化。
 
 请根据用户的消息内容，判断用户是否已经提供了简历内容：
 
-1. **如果当前没有简历内容**：
-   - 提示用户把简历文本内容粘贴输入到这里
+1. **如果用户还没有提供简历内容**：
+   - 友好地提示用户把简历文本内容粘贴输入到这里
    - 要求内容完整
-   - 提示隐藏个人信息（姓名、手机号、邮箱、住址、身份证号等）
+   - 提醒用户隐藏个人信息（如姓名、电话、邮箱等敏感信息）
    - 说明后续会如何帮助评审和优化简历
 
-2. **如果用户已经提供了简历内容**：
+2. 如果用户想要简历模板，直接调用 getResumeTemplateTool 工具获取简历模板，你不要自己生成简历模板。
+
+3. **如果用户已经提供了简历内容**：
    
    **评审简历需要关注以下方面：**
    - 毕业学校是否有优势，专业是否是计算机相关专业。毕业时间越短，学校的影响越大
@@ -64,17 +60,22 @@ export function createResumeOptStream({
     - 不足
    - 然后给出具体的修改建议
 `;
+  const model = myProvider.languageModel("chat-model");
 
   return streamText({
-    model: myProvider.languageModel(selectedChatModel),
+    model,
     system: systemPrompt,
     messages: convertToModelMessages(messages),
-    // experimental_activeTools: ["scoreSkills"],
-    // tools: {
-    //   scoreSkills,
-    // },
-    onFinish: createUsageOnFinish({
-      selectedChatModel,
+    experimental_activeTools: [
+      // "scoreSkills",
+      "getResumeTemplate"
+    ],
+    tools: {
+      // scoreSkills,
+      getResumeTemplate: getResumeTemplateTool,
+    },
+    onFinish: createUsageFinishHandler({
+      modelId: model.modelId,
       dataStream,
       onUsageUpdate,
     }),
