@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import Script from "next/script";
 import { Toaster } from "sonner";
 import { ThemeProvider } from "@/components/theme-provider";
 
@@ -7,7 +8,7 @@ import "./globals.css";
 import { SessionProvider } from "next-auth/react";
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://chat.vercel.ai"),
+  metadataBase: new URL("https://chatbot.boooz.cn"),
   title: "Boz 帮手",
   description: "AI 智能面试官，优化简历，模拟面试",
 };
@@ -53,6 +54,7 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const nodeEnv = process.env.NODE_ENV || 'development'
   return (
     <html
       className={`${geist.variable} ${geistMono.variable}`}
@@ -82,6 +84,24 @@ export default function RootLayout({
           <SessionProvider>{children}</SessionProvider>
         </ThemeProvider>
       </body>
+
+      {/* baidu tongji on production env */}
+      {nodeEnv === 'production' && (
+        <Script
+          id="baidu-tongji-script"
+          dangerouslySetInnerHTML={{
+            __html: `
+              var _hmt = _hmt || [];
+              (function() {
+                var hm = document.createElement("script");
+                hm.src = "https://hm.baidu.com/hm.js?6cca6ed73cc714328d211d61684938e0";
+                var s = document.getElementsByTagName("script")[0];
+                s.parentNode.insertBefore(hm, s);
+              })();
+            `,
+          }}
+        />
+      )}
     </html>
   );
 }
