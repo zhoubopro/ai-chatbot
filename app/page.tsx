@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Script from "next/script";
 import { Button } from "@/components/ui/button";
 import {
   ArrowRight,
@@ -69,6 +70,7 @@ const demos = [
 export default function HomePage() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activeDemo, setActiveDemo] = useState(0);
+  const nodeEnv = process.env.NODE_ENV || 'development'
 
   return (
     <div className="min-h-screen bg-background">
@@ -411,6 +413,24 @@ export default function HomePage() {
           </div>
         </div>
       </footer>
+
+      {/* baidu tongji on production env */}
+      {nodeEnv === 'production' && (
+        <Script
+          id="baidu-tongji-script"
+          dangerouslySetInnerHTML={{
+            __html: `
+              var _hmt = _hmt || [];
+              (function() {
+                var hm = document.createElement("script");
+                hm.src = "https://hm.baidu.com/hm.js?6cca6ed73cc714328d211d61684938e0";
+                var s = document.getElementsByTagName("script")[0];
+                s.parentNode.insertBefore(hm, s);
+              })();
+            `,
+          }}
+        />
+      )}
     </div>
   );
 }
